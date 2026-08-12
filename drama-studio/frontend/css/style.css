@@ -209,3 +209,64 @@ body {
     z-index: 200;
     box-shadow: 0 4px 20px rgba(0,0,0,.4);
 }
+
+/* 制作模式切换 */
+.segmented { display: flex; gap: 8px; }
+.seg {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all .2s;
+}
+.seg.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* 交互式精修 */
+.interactive-panel { grid-column: 1 / -1; }
+.stepper { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.step {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 13px; color: var(--text-dim);
+    transition: all .3s;
+}
+.step-dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: var(--text-dim);
+}
+.step.active { border-color: var(--primary); color: var(--text); }
+.step.active .step-dot { background: var(--primary); color: #fff; }
+.step.done { border-color: var(--success); color: var(--success); }
+.step.done .step-dot { background: var(--success); color: #0f1117; }
+
+.stage-head { margin-bottom: 16px; }
+.stage-head h3 { font-size: 18px; }
+.stage-hint { font-size: 13px; color: var(--text-dim); margin-top: 6px; line-height: 1.6; }
+.context-box { margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.context-title { padding: 10px 12px; background: var(--bg); cursor: pointer; font-size: 13px; color: #a5b4fc; }
+.context-content {
+    margin: 0; padding: 12px; background: #14161f; max-height: 220px; overflow-y: auto;
+    white-space: pre-wrap; font-size: 12px; color: var(--text-dim);
+    border-top: 1px solid var(--border); font-family: "SF Mono", "Menlo", monospace;
+}
+.editor-wrap { margin-bottom: 14px; }
+#stageEditor {
+    width: 100%; min-height: 340px; padding: 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 13px; line-height: 1.7;
+    font-family: "SF Mono", "Menlo", monospace; outline: none; resize: vertical;
+}
+#stageEditor:focus { border-color: var(--primary); }
+#stageEditor.readonly { color: var(--text-dim); background: #14161f; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.loading { font-size: 13px; color: var(--warning); }

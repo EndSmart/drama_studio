@@ -10,6 +10,14 @@ let currentProjectId = null;
 let ws = null;
 let providerData = null;
 
+// 交互式精修模式相关状态
+let currentMode = 'auto';                       // 'auto' | 'interactive'
+let interactiveStages = [];                     // 阶段 key 顺序
+let interactiveCurrent = null;                  // 当前阶段 key
+let currentEnvelope = null;                     // 当前阶段产物信封
+let interactiveConfig = null;                   // {target_duration, llm_provider, ...}
+let interactiveApiKeys = null;                  // {llm_api_key, video_api_key, image_api_key}
+
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
     await loadProviders();
@@ -60,6 +68,11 @@ async function startPipeline() {
     const theme = document.getElementById('theme').value.trim();
     if (!theme) { showToast('请输入创作主题'); return; }
 
+    // 切换面板：auto 显示进度面板，interactive 在创建项目后显示精修面板
+    document.querySelector('.setup-panel').style.display = 'block';
+    document.querySelector('.progress-panel').style.display = 'block';
+    document.getElementById('interactivePanel').style.display = 'none';
+
     const config = {
         target_duration: parseInt(document.getElementById('duration').value) || 60,
         aspect_ratio: document.getElementById('aspectRatio').value,
@@ -91,6 +104,15 @@ async function startPipeline() {
         if (!resp.ok) throw new Error((await resp.json()).detail || '创建失败');
         const project = await resp.json();
         currentProjectId = project.id;
+
+        // 交互式精修模式：创建项目后即进入分步工作区（不再一键跑完）
+        if (currentMode === 'interactive') {
+            btn.disabled = false;
+            btn.textContent = '⚡ 开始制作短剧';
+            await enterInteractive(project.id, config, apiKeys);
+            return;
+        }
+
         connectWS(project.id);
         addLog('system', '系统', `项目创建成功: ${project.id}`);
 
@@ -335,4 +357,191 @@ function showToast(msg) {
     t.textContent = msg;
     t.style.display = 'block';
     setTimeout(() => { t.style.display = 'none'; }, 3000);
+}
+
+// ============ 制作模式切换 ============
+function setMode(m) {
+    currentMode = m;
+    document.querySelectorAll('#modeToggle .seg').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === m);
+    });
+}
+
+// ============ 交互式精修 ============
+async function enterInteractive(projectId, config, apiKeys) {
+    document.querySelector('.setup-panel').style.display = 'none';
+    document.querySelector('.progress-panel').style.display = 'none';
+    document.getElementById('interactivePanel').style.display = 'block';
+    document.getElementById('interactiveResult').style.display = 'none';
+    interactiveConfig = config;
+    interactiveApiKeys = apiKeys;
+
+    try {
+        const resp = await fetch(`/api/projects/${projectId}/stages`);
+        const data = await resp.json();
+        interactiveStages = data.order || [];
+        renderStepper();
+        if (interactiveStages.length) {
+            await runStage(interactiveStages[0], 'run');
+        }
+    } catch (e) {
+        showToast('加载阶段失败: ' + e.message);
+    }
+}
+
+async function runStage(stage, action, instruction = null) {
+    setStageLoading(true);
+    const body = {
+        stage: stage,
+        action: action,
+        llm_provider: interactiveConfig.llm_provider,
+        api_key: interactiveApiKeys.llm_api_key || null,
+        video_provider: interactiveConfig.video_provider,
+        video_api_key: interactiveApiKeys.video_api_key || null,
+        image_provider: interactiveConfig.image_provider,
+        image_api_key: interactiveApiKeys.image_api_key || null,
+        config: interactiveConfig,
+        instruction: instruction,
+    };
+    if (action === 'save') {
+        body.content = document.getElementById('stageEditor').value;
+    }
+    try {
+        const resp = await fetch(`/api/projects/${currentProjectId}/stage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || '执行失败');
+        const data = await resp.json();
+        currentEnvelope = data.artifact;
+        interactiveCurrent = stage;
+        renderStageEditor(currentEnvelope);
+    } catch (e) {
+        showToast('阶段执行失败: ' + e.message);
+    } finally {
+        setStageLoading(false);
+    }
+}
+
+function renderStageEditor(env) {
+    updateStepper(env.stage);
+    document.getElementById('stageTitle').textContent = env.label;
+    document.getElementById('stageHint').textContent = env.hint || '';
+
+    // 只读上下文
+    const ctxBox = document.getElementById('stageContext');
+    if (env.context && env.context.length) {
+        ctxBox.style.display = 'block';
+        document.getElementById('stageContextContent').textContent =
+            env.context.map(c => c.content).join('\n\n');
+    } else {
+        ctxBox.style.display = 'none';
+    }
+
+    // 可编辑产物
+    const editor = document.getElementById('stageEditor');
+    editor.value = env.content || '';
+    editor.readOnly = !env.editable;
+    editor.classList.toggle('readonly', !env.editable);
+    document.getElementById('stageInstruction').value = '';
+
+    // 按钮显隐
+    const showEdit = !!env.editable;
+    document.getElementById('btnSaveContinue').style.display = showEdit ? '' : 'none';
+    document.getElementById('btnRefine').style.display = showEdit ? '' : 'none';
+    document.getElementById('btnPrev').disabled =
+        interactiveStages.indexOf(env.stage) <= 0;
+
+    // 末阶段：展示完成结果
+    if (!env.next_stage) {
+        showInteractiveResult(env);
+    } else {
+        document.getElementById('interactiveResult').style.display = 'none';
+    }
+}
+
+function showInteractiveResult(env) {
+    const result = safeParse(env.content) || {};
+    document.getElementById('interactiveResult').style.display = 'block';
+    document.getElementById('interactiveResultMeta').innerHTML = `
+        时长: <b>${(result.duration_seconds || 0).toFixed(1)} 秒</b><br>
+        镜头数: <b>${result.shot_count || 0}</b> 个<br>
+        字幕: <b>${result.subtitle_count || 0}</b> 条<br>
+        状态: <b style="color:#22c55e">${result.downloadable ? '可下载' : '已完成'}</b>
+    `;
+}
+
+async function stageSaveContinue() {
+    const env = currentEnvelope;
+    if (!env) return;
+    if (env.editable) {
+        await runStage(env.stage, 'save');
+    }
+    if (!env.next_stage) {
+        showInteractiveResult(env);
+        return;
+    }
+    await runStage(env.next_stage, 'run');
+}
+
+async function stageRefine() {
+    const instr = document.getElementById('stageInstruction').value.trim();
+    if (!instr) { showToast('请先填写润色 / 修改指令'); return; }
+    await runStage(interactiveCurrent, 'refine', instr);
+}
+
+async function stageRerun() {
+    await runStage(interactiveCurrent, 'run');
+}
+
+async function stagePrev() {
+    const idx = interactiveStages.indexOf(interactiveCurrent);
+    if (idx <= 0) return;
+    await runStage(interactiveStages[idx - 1], 'run');
+}
+
+function setStageLoading(b) {
+    ['btnSaveContinue', 'btnRefine', 'btnRerun', 'btnPrev'].forEach(id => {
+        document.getElementById(id).disabled = b;
+    });
+    document.getElementById('stageLoading').style.display = b ? 'inline' : 'none';
+}
+
+function toggleContext() {
+    const c = document.getElementById('stageContextContent');
+    c.style.display = (c.style.display === 'none') ? 'block' : 'none';
+}
+
+// ============ 步骤条 ============
+function renderStepper() {
+    const el = document.getElementById('stepper');
+    el.innerHTML = interactiveStages.map((s, i) =>
+        `<div class="step" id="step-${s}" data-stage="${s}">
+            <span class="step-dot">${i + 1}</span>
+            <span class="step-label">${stageLabel(s)}</span>
+         </div>`).join('');
+}
+
+function updateStepper(current) {
+    const idx = interactiveStages.indexOf(current);
+    interactiveStages.forEach((s, i) => {
+        const el = document.getElementById('step-' + s);
+        if (!el) return;
+        el.classList.remove('active', 'done');
+        if (i < idx) el.classList.add('done');
+        else if (i === idx) el.classList.add('active');
+    });
+}
+
+function stageLabel(s) {
+    const map = {
+        screenwriter: '编剧', storyboarder: '分镜',
+        character_designer: '角色', video_producer: '视频', editor: '剪辑',
+    };
+    return map[s] || s;
+}
+
+function safeParse(str) {
+    try { return JSON.parse(str); } catch (e) { return null; }
 }

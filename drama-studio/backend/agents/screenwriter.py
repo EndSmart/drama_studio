@@ -55,7 +55,7 @@ class ScreenwriterAgent(BaseAgent):
 **{角色2}**：{对白}
 ..."""
 
-    async def run(self, state: Dict, config: Dict) -> Any:
+    async def run(self, state: Dict, config: Dict, instruction: str = None) -> Any:
         self.log("编剧开始创作")
 
         # 读取导演工作单
@@ -80,9 +80,21 @@ class ScreenwriterAgent(BaseAgent):
         target_duration = config.get("target_duration", 60)
         # 用 replace 而非 format，避免示例中的 {N}/{地点} 占位符触发 KeyError
         script_prompt = self.SCRIPT_PROMPT.replace("{duration}", str(target_duration))
+
+        # 交互式润色：若用户给出修改意见，则基于现有故事 + 意见修改剧本
+        if instruction:
+            user_msg = (
+                f"这是当前的故事文本：\n{story_text}\n\n"
+                f"请根据以下修改意见对剧本进行润色/改写（保持整体结构与角色一致）：\n"
+                f"【修改意见】{instruction}\n\n请直接输出修改后的标准剧本。"
+            )
+            self.log("编剧按用户意见润色剧本")
+        else:
+            user_msg = f"故事文本：\n{story_text}\n\n请将其转化为标准剧本。"
+
         script_text = await self.llm.chat([
             {"role": "system", "content": script_prompt},
-            {"role": "user", "content": f"故事文本：\n{story_text}\n\n请将其转化为标准剧本。"},
+            {"role": "user", "content": user_msg},
         ], temperature=0.6)
 
         script_path = store.save_artifact(self.project_id, "screenwriter", "script.md", script_text, ext="md")

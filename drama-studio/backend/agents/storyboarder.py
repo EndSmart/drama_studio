@@ -50,7 +50,7 @@ class StoryboarderAgent(BaseAgent):
 {{"storyboard": {{"shots": [...]}}, "music_plan": {{...}} }}
 不要输出任何多余文字。"""
 
-    async def run(self, state: Dict, config: Dict) -> Any:
+    async def run(self, state: Dict, config: Dict, instruction: str = None) -> Any:
         self.log("分镜 Agent 开始拆分剧本")
 
         # 读取剧本
@@ -64,9 +64,18 @@ class StoryboarderAgent(BaseAgent):
         target_duration = config.get("target_duration", 60)
         aspect_ratio = config.get("aspect_ratio", "9:16")
 
+        user_msg = (
+            self.PROMPT.format(duration=target_duration)
+            + f"\n\n剧本内容：\n{script_text}\n\n画幅比例：{aspect_ratio}\n请输出 JSON。"
+        )
+        # 交互式润色：附上用户的修改意见
+        if instruction:
+            user_msg += f"\n\n【用户修改意见，请据此调整分镜】{instruction}"
+            self.log("分镜按用户意见润色")
+
         result = await self.chat_json(
             "你是专业分镜师。严格按照 JSON 格式输出分镜脚本和配乐计划。",
-            self.PROMPT.format(duration=target_duration) + f"\n\n剧本内容：\n{script_text}\n\n画幅比例：{aspect_ratio}\n请输出 JSON。",
+            user_msg,
             temperature=0.4,
         )
 

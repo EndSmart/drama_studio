@@ -84,11 +84,64 @@
                     <input type="password" id="imageApiKey" placeholder="图像平台 API Key（可留空走环境变量）">
                 </div>
 
+                <div class="field">
+                    <label>制作模式</label>
+                    <div class="segmented" id="modeToggle">
+                        <button type="button" class="seg active" data-mode="auto" onclick="setMode('auto')">⚡ 一键生成</button>
+                        <button type="button" class="seg" data-mode="interactive" onclick="setMode('interactive')">✍️ 交互式精修</button>
+                    </div>
+                    <p class="hint" id="modeHint">一键生成：输入主题直接产出成片。交互式精修：每阶段可查看、修改、润色后再继续，多轮直至满意。</p>
+                </div>
+
                 <button class="btn btn-primary btn-lg" id="btnGenerate" onclick="startPipeline()">
                     ⚡ 开始制作短剧
                 </button>
 
                 <p class="hint" id="providerHint"></p>
+            </section>
+
+            <!-- 交互式精修工作区（默认隐藏，选择「交互式精修」模式后显示） -->
+            <section class="panel interactive-panel" id="interactivePanel" style="display:none">
+                <h2 class="panel-title">✍️ 交互式精修</h2>
+
+                <!-- 步骤条 -->
+                <div class="stepper" id="stepper"></div>
+
+                <div class="stage-head">
+                    <h3 id="stageTitle">准备中…</h3>
+                    <p class="stage-hint" id="stageHint"></p>
+                </div>
+
+                <!-- 只读上下文（如故事文本） -->
+                <div class="context-box" id="stageContext" style="display:none">
+                    <div class="context-title" onclick="toggleContext()">📖 参考上下文（点击展开/收起）</div>
+                    <pre class="context-content" id="stageContextContent"></pre>
+                </div>
+
+                <!-- 可编辑产物 -->
+                <div class="editor-wrap">
+                    <textarea id="stageEditor" spellcheck="false" placeholder="该阶段产物将显示在这里，可自由修改…"></textarea>
+                </div>
+
+                <div class="field">
+                    <label>润色 / 修改指令（可选，用于「润色重生成」）</label>
+                    <input type="text" id="stageInstruction" placeholder="例如：把第二幕冲突加强、对白更口语化、增加一个反转…">
+                </div>
+
+                <div class="btn-row" id="stageBtns">
+                    <button class="btn btn-primary" id="btnSaveContinue" onclick="stageSaveContinue()">💾 保存并继续</button>
+                    <button class="btn btn-secondary" id="btnRefine" onclick="stageRefine()">✨ 润色重生成</button>
+                    <button class="btn btn-ghost" id="btnRerun" onclick="stageRerun()">🔄 重新生成</button>
+                    <button class="btn btn-ghost" id="btnPrev" onclick="stagePrev()">⬅️ 上一步</button>
+                    <span class="loading" id="stageLoading" style="display:none">处理中…</span>
+                </div>
+
+                <div class="result-area" id="interactiveResult" style="display:none">
+                    <h3>✅ 制作完成！</h3>
+                    <div class="result-meta" id="interactiveResultMeta"></div>
+                    <button class="btn btn-primary" onclick="downloadFinal()">⬇️ 下载成片</button>
+                    <button class="btn btn-ghost" onclick="viewArtifacts()">📂 查看中间产物</button>
+                </div>
             </section>
 
             <!-- 右侧：进度与结果 -->

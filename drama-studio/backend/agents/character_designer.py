@@ -64,7 +64,7 @@ class CharacterDesignerAgent(BaseAgent):
                 self._image = None
         return self._image
 
-    async def run(self, state: Dict, config: Dict) -> Any:
+    async def run(self, state: Dict, config: Dict, instruction: str = None) -> Any:
         self.log("角色设计 Agent 开始")
 
         # 读取剧本和分镜中的角色
@@ -77,9 +77,17 @@ class CharacterDesignerAgent(BaseAgent):
             for c in shot.get("characters_in_shot", []):
                 chars_in_shots.add(c)
 
+        user_msg = (
+            self.PROMPT
+            + f"\n\n剧本中的角色线索：\n{script[:3000]}\n\n分镜出现的角色：{list(chars_in_shots)}\n请为这些角色设计角色卡，输出 JSON 数组。"
+        )
+        if instruction:
+            user_msg += f"\n\n【用户修改意见，请据此调整角色设定】{instruction}"
+            self.log("角色设计按用户意见润色")
+
         character_cards = await self.chat_json(
             "你是角色设计总监，严格输出 JSON 数组。",
-            self.PROMPT + f"\n\n剧本中的角色线索：\n{script[:3000]}\n\n分镜出现的角色：{list(chars_in_shots)}\n请为这些角色设计角色卡，输出 JSON 数组。",
+            user_msg,
             temperature=0.5,
         )
 

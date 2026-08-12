@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 
 from ..services.storage import store
 from ..services.pipeline import pipeline_service
+from ..services.interactive import interactive_service
 from ..providers.llm import LLMFactory
 from ..providers.video import VideoProviderFactory
 from ..providers.image import ImageProviderFactory
@@ -107,6 +108,71 @@ async def run_pipeline(project_id: str, body: Dict):
             project_id, llm_provider, api_key=api_key, config_override=config_override
         )
         return {"status": "started", "project_id": project_id}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ---------- 交互式（分步精修）执行 ----------
+@router.get("/projects/{project_id}/stages")
+async def get_stage_defs(project_id: str):
+    """返回交互式阶段的顺序与定义（供前端渲染步骤条）。"""
+    state = store.load_state(project_id)
+    if not state:
+        raise HTTPException(404, "项目不存在")
+    return {
+        "stages": interactive_service.stage_defs(),
+        "order": interactive_service.stage_order(),
+    }
+
+
+@router.post("/projects/{project_id}/stage")
+async def run_stage(project_id: str, body: Dict):
+    """
+    交互式分阶段执行。
+
+    body:
+      stage:   阶段 key（screenwriter / storyboarder / character_designer / video_producer / editor）
+      action:  "run"    —— 运行该阶段（生成/重新生成）
+               "refine" —— 按 instruction 润色重生成
+               "save"   —— 保存用户对产物的编辑（content 字段）
+      llm_provider / api_key / video_provider / video_api_key / image_provider / image_api_key
+      config:  {...}                      # 覆盖配置
+      instruction: "润色意见..."          # refine 时使用
+      content: "用户编辑后的文本/JSON"     # save 时使用
+    """
+    state = store.load_state(project_id)
+    if not state:
+        raise HTTPException(404, "项目不存在")
+
+    stage = body.get("stage")
+    action = (body.get("action") or "run").lower()
+
+    providers = {
+        "llm_provider": body.get("llm_provider") or config.DEFAULT_CONFIG["llm_provider"],
+        "api_key": body.get("api_key"),
+        "video_provider": body.get("video_provider") or config.DEFAULT_CONFIG["video_provider"],
+        "video_api_key": body.get("video_api_key"),
+        "image_provider": body.get("image_provider") or config.DEFAULT_CONFIG["image_provider"],
+        "image_api_key": body.get("image_api_key"),
+    }
+    config_override = body.get("config", {})
+    instruction = body.get("instruction")
+    content = body.get("content")
+
+    try:
+        if action == "save":
+            if content is None:
+                raise ValueError("save 操作需要提供 content")
+            envelope = await interactive_service.save(project_id, stage, content)
+        elif action in ("run", "refine"):
+            envelope = await interactive_service.execute(
+                project_id, stage, providers,
+                config_override=config_override,
+                instruction=instruction if action == "refine" else None,
+            )
+        else:
+            raise ValueError(f"未知 action: {action}")
+        return {"status": "ok", "action": action, "artifact": envelope}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
