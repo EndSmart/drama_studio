@@ -18,6 +18,11 @@
                 </div>
             </div>
             <div class="header-right">
+                <span class="user-pill" id="userPill" style="display:none">
+                    👤 <span id="userName"></span>
+                    <button class="btn btn-ghost btn-sm" id="btnUserMgmt" onclick="showUserMgmt()" style="display:none">👥 用户管理</button>
+                    <button class="btn btn-ghost btn-sm" onclick="logout()">退出</button>
+                </span>
                 <button class="btn btn-ghost" id="btnHistory" onclick="showProjects()">📂 项目历史</button>
             </div>
         </header>
@@ -204,6 +209,45 @@
         </div>
 
         <div class="toast" id="toast" style="display:none"></div>
+    </div>
+
+    <!-- 登录遮罩 -->
+    <div class="login-overlay" id="loginOverlay" style="display:none">
+        <div class="login-card">
+            <div class="login-logo">🎬</div>
+            <h2>Drama Studio</h2>
+            <p class="login-sub">登录以使用短剧制作智能体集群</p>
+            <div class="field">
+                <label>用户名</label>
+                <input type="text" id="loginUser" placeholder="用户名" onkeydown="if(event.key==='Enter')doLogin()">
+            </div>
+            <div class="field">
+                <label>密码</label>
+                <input type="password" id="loginPass" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
+            </div>
+            <button class="btn btn-primary btn-lg" id="btnLogin" onclick="doLogin()">登录</button>
+            <p class="hint" id="loginHint"></p>
+        </div>
+    </div>
+
+    <!-- 用户管理弹窗（仅管理员可见） -->
+    <div class="modal" id="userModal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>👥 用户管理</h3>
+                <button class="modal-close" onclick="closeUserMgmt()">×</button>
+            </div>
+            <div class="user-add">
+                <input type="text" id="newUserName" placeholder="新用户名">
+                <input type="password" id="newUserPass" placeholder="密码">
+                <select id="newUserRole">
+                    <option value="user" selected>普通用户</option>
+                    <option value="admin">管理员</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="addUser()">+ 添加</button>
+            </div>
+            <div id="userList" class="user-list"></div>
+        </div>
     </div>
 
     <script src="/js/app.js"></script>

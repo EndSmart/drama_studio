@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
 from ..services.storage import store
@@ -23,7 +23,7 @@ from ..services.interactive import interactive_service
 from ..providers.llm import LLMFactory
 from ..providers.video import VideoProviderFactory
 from ..providers.image import ImageProviderFactory
-from .. import config
+from .. import auth, config
 
 logger = logging.getLogger("drama-studio.routes.api")
 
@@ -33,6 +33,89 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 async def health():
     return {"status": "ok", "service": "drama-studio"}
+
+
+# ============ 登录认证 ============
+def _current_username(request: Request) -> str:
+    token = request.cookies.get(auth.SESSION_COOKIE)
+    username = auth.verify_session_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录或登录已过期")
+    return username
+
+
+def _require_admin(request: Request) -> dict:
+    username = _current_username(request)
+    user = auth.get_user(username)
+    if not user or user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
+@router.post("/login")
+async def login(body: Dict, response: Response):
+    """登录。成功后在 HttpOnly Cookie 中写入会话 token。"""
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    user = auth.authenticate(username, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    token = auth.create_session_token(user["username"])
+    response.set_cookie(
+        key=auth.SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        max_age=auth.SESSION_MAX_AGE,
+        path="/",
+        samesite="lax",
+    )
+    return {"username": user["username"], "role": user["role"]}
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"status": "ok"}
+
+
+@router.get("/me")
+async def me(request: Request):
+    username = _current_username(request)
+    user = auth.get_user(username)
+    return {"username": user["username"], "role": user["role"]}
+
+
+# ============ 用户管理（仅管理员） ============
+@router.get("/users")
+async def get_users(request: Request):
+    _require_admin(request)
+    return {"users": auth.list_users()}
+
+
+@router.post("/users")
+async def add_user(body: Dict, request: Request):
+    _require_admin(request)
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    role = body.get("role") or "user"
+    try:
+        user = auth.create_user(username, password, role)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "user": user}
+
+
+@router.delete("/users/{username}")
+async def remove_user(username: str, request: Request):
+    _require_admin(request)
+    current = _current_username(request)
+    if username == current:
+        raise HTTPException(status_code=400, detail="不能删除当前登录的账户")
+    try:
+        auth.delete_user(username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok"}
 
 
 # ---------- Provider 信息 ----------

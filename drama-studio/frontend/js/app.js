@@ -20,9 +20,145 @@ let interactiveApiKeys = null;                  // {llm_api_key, video_api_key, 
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadProviders();
-    updateProviderHint();
+    await checkAuth();
 });
+
+// ============ 登录鉴权 ============
+async function checkAuth() {
+    try {
+        const resp = await fetch('/api/me');
+        if (resp.ok) {
+            const me = await resp.json();
+            onAuthed(me);
+            return;
+        }
+    } catch (e) { /* ignore */ }
+    // 未登录：展示登录遮罩
+    document.getElementById('loginOverlay').style.display = 'flex';
+}
+
+function onAuthed(me) {
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.getElementById('userPill').style.display = 'inline-flex';
+    document.getElementById('userName').textContent = me.username;
+    document.getElementById('btnUserMgmt').style.display =
+        (me.role === 'admin') ? 'inline-block' : 'none';
+    loadProviders();
+    updateProviderHint();
+}
+
+async function doLogin() {
+    const username = document.getElementById('loginUser').value.trim();
+    const password = document.getElementById('loginPass').value;
+    if (!username || !password) { showLoginHint('请输入用户名和密码'); return; }
+
+    const btn = document.getElementById('btnLogin');
+    btn.disabled = true;
+    btn.textContent = '登录中…';
+    try {
+        const resp = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showLoginHint(err.detail || '登录失败');
+            return;
+        }
+        const me = await resp.json();
+        onAuthed(me);
+        document.getElementById('loginUser').value = '';
+        document.getElementById('loginPass').value = '';
+        document.getElementById('loginHint').textContent = '';
+    } catch (e) {
+        showLoginHint('登录失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '登录';
+    }
+}
+
+function showLoginHint(msg) {
+    document.getElementById('loginHint').textContent = msg;
+}
+
+async function logout() {
+    try { await fetch('/api/logout', { method: 'POST' }); } catch (e) {}
+    document.getElementById('userPill').style.display = 'none';
+    document.getElementById('btnUserMgmt').style.display = 'none';
+    // 重置界面
+    resetUI();
+    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    document.getElementById('loginOverlay').style.display = 'flex';
+    showLoginHint('');
+}
+
+// ============ 用户管理（仅管理员） ============
+async function showUserMgmt() {
+    try {
+        const resp = await fetch('/api/users');
+        if (!resp.ok) { showToast('无权访问'); return; }
+        const data = await resp.json();
+        const meName = document.getElementById('userName').textContent;
+        const list = document.getElementById('userList');
+        list.innerHTML = data.users.map(u => `
+            <div class="user-item">
+                <div class="user-info">
+                    <span class="user-name">${escapeHtml(u.username)}</span>
+                    <span class="user-role ${u.role}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
+                </div>
+                ${u.username === meName ? '' : '<button class="btn btn-ghost btn-sm" onclick="deleteUser(\'' + escapeHtml(u.username) + '\')">删除</button>'}
+            </div>
+        `).join('');
+        document.getElementById('userModal').style.display = 'flex';
+    } catch (e) {
+        showToast('加载用户失败: ' + e.message);
+    }
+}
+
+function closeUserMgmt() {
+    document.getElementById('userModal').style.display = 'none';
+}
+
+async function addUser() {
+    const username = document.getElementById('newUserName').value.trim();
+    const password = document.getElementById('newUserPass').value;
+    const role = document.getElementById('newUserRole').value;
+    if (!username || !password) { showToast('请填写用户名和密码'); return; }
+    try {
+        const resp = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, role }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || '添加失败');
+            return;
+        }
+        document.getElementById('newUserName').value = '';
+        document.getElementById('newUserPass').value = '';
+        showUserMgmt();
+    } catch (e) {
+        showToast('添加失败: ' + e.message);
+    }
+}
+
+async function deleteUser(username) {
+    if (!confirm('确定删除用户「' + username + '」？')) return;
+    try {
+        const resp = await fetch('/api/users/' + encodeURIComponent(username), { method: 'DELETE' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || '删除失败');
+            return;
+        }
+        showUserMgmt();
+    } catch (e) {
+        showToast('删除失败: ' + e.message);
+    }
+}
 
 async function loadProviders() {
     try {

@@ -10,6 +10,7 @@ from typing import Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from .. import auth
 from ..services.pipeline import progress_emitter
 
 logger = logging.getLogger("drama-studio.routes.websocket")
@@ -54,6 +55,11 @@ progress_emitter.add_listener(_relay)
 
 @router.websocket("/ws/{project_id}")
 async def websocket_endpoint(ws: WebSocket, project_id: str):
+    # 校验会话 Cookie（BaseHTTPMiddleware 不包裹 WebSocket，需在此处单独校验）
+    token = ws.cookies.get(auth.SESSION_COOKIE)
+    if not auth.verify_session_token(token):
+        await ws.close(code=1008)  # Policy Violation
+        return
     await manager.connect(project_id, ws)
     try:
         # 发送连接成功消息
