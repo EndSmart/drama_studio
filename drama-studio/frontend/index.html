@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drama Studio · 短剧制作智能体集群</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- 头部 -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🎬</span>
+                <div>
+                    <h1>Drama Studio</h1>
+                    <p>从创意到成片的自动化短剧制作智能体集群</p>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-ghost" id="btnHistory" onclick="showProjects()">📂 项目历史</button>
+            </div>
+        </header>
+
+        <!-- 主内容 -->
+        <main class="main">
+            <!-- 左侧：创作设置 -->
+            <section class="panel setup-panel">
+                <h2 class="panel-title">🎬 创意设置</h2>
+
+                <div class="field">
+                    <label>创作主题</label>
+                    <textarea id="theme" rows="3" placeholder="例如：深夜加班的程序员发现自己工作的公司是个骗局，决定调查真相，却陷入更大阴谋..."></textarea>
+                </div>
+
+                <div class="field">
+                    <label>类型提示（可选）</label>
+                    <input type="text" id="genreHint" placeholder="如：悬疑 / 言情 / 喜剧">
+                </div>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label>目标时长（秒）</label>
+                        <input type="number" id="duration" value="60" min="15" max="300">
+                    </div>
+                    <div class="field">
+                        <label>画幅</label>
+                        <select id="aspectRatio">
+                            <option value="9:16" selected>9:16 竖屏</option>
+                            <option value="16:9">16:9 横屏</option>
+                            <option value="1:1">1:1 方形</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label>视觉风格</label>
+                    <select id="style">
+                        <option value="cinematic" selected>🎥 电影质感</option>
+                        <option value="realistic">📷 都市写实</option>
+                        <option value="japanese">🌸 日系清新</option>
+                        <option value="anime">🎨 二次元动漫</option>
+                        <option value="dark">🌑 暗黑冷峻</option>
+                    </select>
+                </div>
+
+                <h3 class="sub-title">🤖 智能体配置</h3>
+
+                <div class="field">
+                    <label>文本大模型（编剧/分镜/角色）</label>
+                    <select id="llmProvider"></select>
+                    <input type="password" id="llmApiKey" placeholder="输入该模型的 API Key（或已配置环境变量可留空）">
+                </div>
+
+                <div class="field">
+                    <label>视频生成平台</label>
+                    <select id="videoProvider"></select>
+                    <input type="password" id="videoApiKey" placeholder="视频平台 API Key（可灵需 AK/SK，可留空走环境变量）">
+                </div>
+
+                <div class="field">
+                    <label>图像生成平台（角色关键帧）</label>
+                    <select id="imageProvider"></select>
+                    <input type="password" id="imageApiKey" placeholder="图像平台 API Key（可留空走环境变量）">
+                </div>
+
+                <button class="btn btn-primary btn-lg" id="btnGenerate" onclick="startPipeline()">
+                    ⚡ 开始制作短剧
+                </button>
+
+                <p class="hint" id="providerHint"></p>
+            </section>
+
+            <!-- 右侧：进度与结果 -->
+            <section class="panel progress-panel">
+                <h2 class="panel-title">📊 制作进度</h2>
+
+                <!-- 进度条 -->
+                <div class="progress-overview">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">等待开始...</div>
+                </div>
+
+                <!-- 阶段状态 -->
+                <div class="stages" id="stages">
+                    <div class="stage" data-stage="director"><span class="stage-dot"></span>总导演分析</div>
+                    <div class="stage" data-stage="screenwriter"><span class="stage-dot"></span>编剧创作</div>
+                    <div class="stage" data-stage="storyboarder"><span class="stage-dot"></span>分镜设计</div>
+                    <div class="stage" data-stage="character_designer"><span class="stage-dot"></span>角色设计</div>
+                    <div class="stage" data-stage="video_producer"><span class="stage-dot"></span>视频生成</div>
+                    <div class="stage" data-stage="editor"><span class="stage-dot"></span>剪辑成片</div>
+                </div>
+
+                <!-- 日志 -->
+                <div class="log-area" id="logArea">
+                    <div class="log-empty" id="logEmpty">进度日志将在这里显示</div>
+                </div>
+
+                <!-- 结果 -->
+                <div class="result-area" id="resultArea" style="display:none">
+                    <h3>✅ 制作完成！</h3>
+                    <div class="result-meta" id="resultMeta"></div>
+                    <button class="btn btn-primary" onclick="downloadFinal()">⬇️ 下载成片</button>
+                    <button class="btn btn-ghost" onclick="viewArtifacts()">📂 查看中间产物</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- 项目历史弹窗 -->
+        <div class="modal" id="projectsModal" style="display:none">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📂 项目历史</h3>
+                    <button class="modal-close" onclick="closeProjects()">×</button>
+                </div>
+                <div id="projectsList" class="projects-list"></div>
+            </div>
+        </div>
+
+        <!-- 产物弹窗 -->
+        <div class="modal" id="artifactsModal" style="display:none">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📂 中间产物</h3>
+                    <button class="modal-close" onclick="closeArtifacts()">×</button>
+                </div>
+                <div id="artifactsList" class="projects-list"></div>
+            </div>
+        </div>
+
+        <div class="toast" id="toast" style="display:none"></div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

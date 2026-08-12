@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行时数据（含 API Key 引用的项目状态，不进版本库）
+data/
+*.local.json
+
+# 中间产物
+artifacts/
+clips/
+*.mp4
+*.webm
+*.srt
+
+# 环境
+.env
+*.env

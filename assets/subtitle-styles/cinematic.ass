@@ -1,0 +1,14 @@
+[Script Info]
+; 电影风格字幕
+; 底部居中，较大字体，柔和半透明描边，适合电影感画面
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans CJK SC,52,&H00F0F0F0,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1.5,2,60,60,100,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
