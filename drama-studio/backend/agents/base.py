@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from ..providers.llm import LLMProvider
+from ..providers.llm import LLMProvider, LLMFactory
 from ..services.storage import store
 
 logger = logging.getLogger("drama-studio.agents.base")
@@ -31,9 +31,11 @@ class BaseAgent:
 
     @property
     def llm(self) -> LLMProvider:
-        """惰性创建 LLM provider。"""
+        """惰性创建 LLM provider（通过工厂按 api_style 路由）。"""
         if self._llm is None:
-            self._llm = LLMProvider(provider=self.llm_provider_name, api_key=self._llm_api_key)
+            self._llm = LLMFactory.create(
+                provider=self.llm_provider_name, api_key=self._llm_api_key
+            )
         return self._llm
 
     async def run(self, state: Dict, config: Dict) -> Any:

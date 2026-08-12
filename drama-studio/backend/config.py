@@ -19,13 +19,33 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 # ============ LLM Provider 配置表 ============
-# 所有 provider 均支持 OpenAI /v1/chat/completions 兼容格式
+# api_style:
+#   "openai"    —— 兼容 OpenAI /v1/chat/completions 格式（用 AsyncOpenAI 调用）
+#   "anthropic" —— 使用 Anthropic 原生 /v1/messages 接口（用 httpx 直连）
 LLM_PROVIDERS = {
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-4o",
+        "env_key": "OPENAI_API_KEY",
+        "api_style": "openai",
+        "desc": "OpenAI GPT 系列，通用能力强，亦可用于图像生成",
+    },
+    "claude": {
+        "name": "Anthropic Claude",
+        "base_url": "https://api.anthropic.com/v1",
+        "default_model": "claude-3-5-sonnet-latest",
+        "env_key": "ANTHROPIC_API_KEY",
+        "api_style": "anthropic",
+        "anthropic_version": "2023-06-01",
+        "desc": "Anthropic Claude，长上下文、强推理（原生 Messages API）",
+    },
     "deepseek": {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com",
         "default_model": "deepseek-v4-flash",
         "env_key": "DEEPSEEK_API_KEY",
+        "api_style": "openai",
         "desc": "DeepSeek V4，性价比高，支持 Thinking 模式",
     },
     "qwen": {
@@ -33,6 +53,7 @@ LLM_PROVIDERS = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "default_model": "qwen3.8-max",
         "env_key": "DASHSCOPE_API_KEY",
+        "api_style": "openai",
         "desc": "阿里百炼平台，OpenAI 兼容",
     },
     "moonshot": {
@@ -40,6 +61,7 @@ LLM_PROVIDERS = {
         "base_url": "https://api.moonshot.cn/v1",
         "default_model": "kimi-k3",
         "env_key": "MOONSHOT_API_KEY",
+        "api_style": "openai",
         "desc": "月之暗面 Kimi，长上下文",
     },
     "zhipu": {
@@ -47,6 +69,7 @@ LLM_PROVIDERS = {
         "base_url": "https://open.bigmodel.cn/api/paas/v4/",
         "default_model": "glm-5.2",
         "env_key": "ZHIPU_API_KEY",
+        "api_style": "openai",
         "desc": "智谱清言 GLM，多模态",
     },
     "doubao": {
@@ -54,6 +77,7 @@ LLM_PROVIDERS = {
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
         "default_model": "ep-2025xxxxxxxxxxxx",  # 需在方舟控制台创建 Endpoint
         "env_key": "ARK_API_KEY",
+        "api_style": "openai",
         "desc": "火山方舟，model 填 Endpoint ID (ep-xxx)",
         "requires_endpoint": True,
     },
@@ -104,6 +128,14 @@ VIDEO_PROVIDERS = {
 
 # ============ 图像生成 Provider ============
 IMAGE_PROVIDERS = {
+    "openai": {
+        "name": "OpenAI 图像生成",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-image-1",
+        "env_key": "OPENAI_API_KEY",
+        "auth": "bearer",
+        "desc": "OpenAI gpt-image-1 / DALL·E 3 文生图，支持图生图编辑（image 编辑）",
+    },
     "wanx": {
         "name": "阿里通义万相",
         "base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
@@ -121,9 +153,9 @@ DEFAULT_CONFIG = {
     "shot_duration": 5,           # 单镜头默认时长（秒）
     "aspect_ratio": "9:16",       # 竖屏短剧
     "resolution": "720p",         # 视频分辨率
-    "llm_provider": "deepseek",   # 默认 LLM provider
-    "video_provider": "kling",    # 默认视频 provider
-    "image_provider": "wanx",     # 默认图像 provider
+    "llm_provider": "openai",     # 默认 LLM provider（可选 openai / claude / deepseek / qwen ...）
+    "video_provider": "seedance", # 默认视频 provider（可选 seedance / kling / wanx / cogvideox）
+    "image_provider": "wanx",     # 默认图像 provider（可选 wanx / openai）
     "style": "cinematic",         # 视觉风格
     "episodes": 1,                # 集数
 }
@@ -149,4 +181,12 @@ def is_video_provider_configured(provider_key):
         return False
     if cfg["auth"] == "jwt":
         return bool(get_env(cfg["env_key_access"]) and get_env(cfg["env_key_secret"]))
+    return bool(get_env(cfg["env_key"]))
+
+
+def is_image_provider_configured(provider_key):
+    """检查某图像 provider 是否已配置（环境变量中存在 API Key）。"""
+    cfg = IMAGE_PROVIDERS.get(provider_key)
+    if not cfg:
+        return False
     return bool(get_env(cfg["env_key"]))
