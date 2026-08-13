@@ -15,12 +15,15 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 from typing import Optional
 
 from . import config
+
+logger = logging.getLogger("drama-studio.auth")
 
 SESSION_COOKIE = "ds_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 天
@@ -86,8 +89,46 @@ def _seed_admin() -> None:
         _save_users(users)
 
 
-# 模块导入时即保证存在默认管理员
-_seed_admin()
+def ensure_admin_account() -> None:
+    """
+    启动时保证存在管理员账户，并支持通过环境变量 ADMIN_PASSWORD 重置密码。
+
+    用法：启动时设置 ADMIN_PASSWORD=新密码 然后重启服务，
+    即可把 admin 的密码强制改为「新密码」（解决忘记密码被锁死的问题）。
+    """
+    override = os.environ.get("ADMIN_PASSWORD")
+    users = _load_users()
+    admin = next((u for u in users if u.get("username") == DEFAULT_ADMIN["username"]), None)
+    if admin:
+        if override:
+            admin["password_hash"] = _hash_password(override)
+            _save_users(users)
+            logger.info("admin 密码已由环境变量 ADMIN_PASSWORD 重置")
+        return
+    # 不存在管理员：创建（优先用 override，否则用默认 admin123）
+    pw = override or DEFAULT_ADMIN["password"]
+    users.append({
+        "username": DEFAULT_ADMIN["username"],
+        "password_hash": _hash_password(pw),
+        "role": "admin",
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    _save_users(users)
+
+
+def set_password(username: str, password: str) -> None:
+    """直接重置某用户的密码（不校验旧密码，供运维/命令行重置使用）。"""
+    users = _load_users()
+    for u in users:
+        if u.get("username") == username:
+            u["password_hash"] = _hash_password(password)
+            _save_users(users)
+            return
+    raise ValueError("用户不存在")
+
+
+# 模块导入时即保证存在默认管理员（并应用 ADMIN_PASSWORD 覆盖）
+ensure_admin_account()
 
 
 def authenticate(username: str, password: str) -> Optional[dict]:
