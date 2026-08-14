@@ -17,12 +17,14 @@
                     <p>从创意到成片的自动化短剧制作智能体集群</p>
                 </div>
             </div>
-            <div class="header-right">
+                <div class="header-right">
                 <span class="user-pill" id="userPill" style="display:none">
                     👤 <span id="userName"></span>
                     <button class="btn btn-ghost btn-sm" id="btnUserMgmt" onclick="showUserMgmt()" style="display:none">👥 用户管理</button>
                     <button class="btn btn-ghost btn-sm" onclick="logout()">退出</button>
                 </span>
+                <button class="btn btn-ghost btn-sm" id="btnPrompts" onclick="showPrompts()">📝 提示词</button>
+                <button class="btn btn-ghost btn-sm" id="btnCharacters" onclick="showCharacters()">👥 角色</button>
                 <button class="btn btn-ghost" id="btnHistory" onclick="showProjects()">📂 项目历史</button>
             </div>
         </header>
@@ -209,6 +211,42 @@
         </div>
 
         <div class="toast" id="toast" style="display:none"></div>
+
+    <!-- 系统提示词管理弹窗 -->
+    <div class="modal" id="promptsModal" style="display:none">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>📝 系统提示词管理</h3>
+                <button class="modal-close" onclick="closePrompts()">×</button>
+            </div>
+            <div class="prompts-toolbar">
+                <div class="segmented" id="promptScopeToggle">
+                    <button type="button" class="seg active" data-scope="project" id="scopeProjectBtn" onclick="setPromptScope('project')">本项目覆盖</button>
+                    <button type="button" class="seg" data-scope="global" id="scopeGlobalBtn" onclick="setPromptScope('global')">全局默认</button>
+                </div>
+                <span class="hint" id="promptScopeHint"></span>
+                <button class="btn btn-primary btn-sm" onclick="savePrompts()">💾 保存全部</button>
+                <button class="btn btn-ghost btn-sm" onclick="resetPrompts()">↺ 重置为默认</button>
+            </div>
+            <div id="promptsList" class="prompts-list"></div>
+        </div>
+    </div>
+
+    <!-- 角色管理弹窗 -->
+    <div class="modal" id="charactersModal" style="display:none">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>👥 角色管理</h3>
+                <button class="modal-close" onclick="closeCharacters()">×</button>
+            </div>
+            <div class="characters-toolbar">
+                <span class="hint">可手动添加 / 编辑 / 删除角色，字段自由（appearance 可任意增删）。保存后生成时将以此为准。</span>
+                <button class="btn btn-primary btn-sm" onclick="addCharacter()">＋ 新增角色</button>
+                <button class="btn btn-primary btn-sm" onclick="saveCharacters()">💾 保存角色</button>
+            </div>
+            <div id="charactersList" class="characters-list"></div>
+        </div>
+    </div>
     </div>
 
     <!-- 登录遮罩 -->

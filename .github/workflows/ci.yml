@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  dryrun-pipeline:
+    name: Dry-run pipeline regression
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # 后端代码位于仓库内的 drama-studio/ 子目录
+        working-directory: drama-studio
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run dry-run pipeline test
+        run: python tests/dryrun_pipeline.py
+
+      - name: Report status
+        if: always()
+        run: echo "Dry-run pipeline test finished."

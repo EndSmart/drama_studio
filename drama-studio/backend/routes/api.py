@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from ..services.storage import store
 from ..services.pipeline import pipeline_service
 from ..services.interactive import interactive_service
+from ..services.prompts import prompt_store
 from ..providers.llm import LLMFactory
 from ..providers.video import VideoProviderFactory
 from ..providers.image import ImageProviderFactory
@@ -153,6 +154,70 @@ async def create_project(body: Dict):
     store.save_state(project_id, state)
 
     return {"id": project_id, "status": "created", "theme": theme}
+
+
+# ---------- 系统提示词管理 ----------
+@router.get("/prompts")
+async def get_prompts(project_id: str = Query(None), request: Request = None):
+    """列出所有阶段的系统提示词（代码默认 / 全局覆盖 / 项目覆盖 / 实际生效）。"""
+    if project_id:
+        st = store.load_state(project_id)
+        if not st:
+            raise HTTPException(404, "项目不存在")
+    return {"prompts": prompt_store.list_all(project_id)}
+
+
+@router.put("/prompts")
+async def put_prompt(body: Dict, request: Request):
+    """
+    保存提示词覆盖。
+    body: {scope:'global'|'project', project_id?, stage, key, text}
+    全局写操作需要管理员权限。
+    """
+    scope = (body.get("scope") or "global").lower()
+    stage = body.get("stage")
+    key = body.get("key")
+    text = body.get("text", "")
+    if not stage or not key:
+        raise HTTPException(400, "scope / stage / key 必填")
+    if scope == "global":
+        _require_admin(request)
+        prompt_store.set_global(stage, key, text)
+    elif scope == "project":
+        project_id = body.get("project_id")
+        if not project_id:
+            raise HTTPException(400, "project 作用域需要 project_id")
+        if not store.load_state(project_id):
+            raise HTTPException(404, "项目不存在")
+        prompt_store.set_project(project_id, stage, key, text)
+    else:
+        raise HTTPException(400, f"未知 scope: {scope}")
+    return {"status": "ok", "scope": scope, "stage": stage, "key": key}
+
+
+@router.post("/prompts/reset")
+async def reset_prompt(body: Dict, request: Request):
+    """
+    重置提示词覆盖（回退到更低优先级/代码默认）。
+    body: {scope:'global'|'project', project_id?, stage?, key?}
+    全局写操作需要管理员权限。
+    """
+    scope = (body.get("scope") or "global").lower()
+    stage = body.get("stage")
+    key = body.get("key")
+    if scope == "global":
+        _require_admin(request)
+        prompt_store.reset("global", stage=stage, key=key)
+    elif scope == "project":
+        project_id = body.get("project_id")
+        if not project_id:
+            raise HTTPException(400, "project 作用域需要 project_id")
+        if not store.load_state(project_id):
+            raise HTTPException(404, "项目不存在")
+        prompt_store.reset("project", project_id=project_id, stage=stage, key=key)
+    else:
+        raise HTTPException(400, f"未知 scope: {scope}")
+    return {"status": "ok", "scope": scope, "stage": stage, "key": key}
 
 
 @router.get("/projects")
@@ -332,3 +397,45 @@ async def get_final_video(project_id: str):
         media_type="video/mp4",
         filename=f"drama_{project_id}.mp4",
     )
+
+
+# ---------- 角色定义管理（可手动增删改，字段自由） ----------
+@router.get("/projects/{project_id}/characters")
+async def get_characters(project_id: str):
+    """返回当前项目的角色列表。"""
+    state = store.load_state(project_id)
+    if not state:
+        raise HTTPException(404, "项目不存在")
+    chars = store.load_artifact(project_id, "artifacts/characters/characters.json")
+    chars = chars if isinstance(chars, list) else []
+    return {"characters": chars}
+
+
+@router.put("/projects/{project_id}/characters")
+async def put_characters(project_id: str, body: Dict):
+    """
+    整体替换角色列表（增/改/删由前端决定）。
+    body: {characters: [ {name, role, personality, appearance:{...}, seed_prompt, style}, ... ]}
+    """
+    state = store.load_state(project_id)
+    if not state:
+        raise HTTPException(404, "项目不存在")
+    chars = body.get("characters")
+    if not isinstance(chars, list):
+        raise HTTPException(400, "characters 必须是数组")
+    # 规范化：保证必要字段存在
+    normalized = []
+    for c in chars:
+        if not isinstance(c, dict):
+            continue
+        c.setdefault("name", "角色")
+        c.setdefault("role", "主角")
+        c.setdefault("personality", "")
+        c.setdefault("appearance", {})
+        c.setdefault("seed_prompt", "")
+        c.setdefault("style", config.DEFAULT_CONFIG.get("style", "cinematic"))
+        normalized.append(c)
+    # 写回聚合文件 + 各角色卡
+    store.save_artifact(project_id, "characters", "characters.json", normalized)
+    interactive_service._write_character_cards(project_id, normalized)
+    return {"status": "ok", "count": len(normalized), "characters": normalized}

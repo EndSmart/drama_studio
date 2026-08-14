@@ -32,6 +32,15 @@ logger = logging.getLogger("drama-studio.services.interactive")
 # context:  展示时一并加载的只读上下文产物
 STAGE_DEFS = [
     {
+        "key": "director",
+        "label": "总导演",
+        "editable": True,
+        "format": "json",
+        "artifact": "artifacts/director/creative_brief.json",
+        "context": [],
+        "hint": "总导演分析主题、产出导演工作单（角色/类型/基调/情节脉络）。可查看并修改后再继续。",
+    },
+    {
         "key": "screenwriter",
         "label": "编剧创作",
         "editable": True,
@@ -83,6 +92,7 @@ class InteractiveService:
     """交互式分阶段执行引擎。"""
 
     def __init__(self):
+        from ..agents.director import DirectorAgent
         from ..agents.screenwriter import ScreenwriterAgent
         from ..agents.storyboarder import StoryboarderAgent
         from ..agents.character_designer import CharacterDesignerAgent
@@ -90,6 +100,7 @@ class InteractiveService:
         from ..agents.editor import EditorAgent
 
         self.agent_map = {
+            "director": DirectorAgent,
             "screenwriter": ScreenwriterAgent,
             "storyboarder": StoryboarderAgent,
             "character_designer": CharacterDesignerAgent,
@@ -97,7 +108,7 @@ class InteractiveService:
             "editor": EditorAgent,
         }
         # 这些阶段支持 instruction 润色
-        self._refinable = {"screenwriter", "storyboarder", "character_designer"}
+        self._refinable = {"director", "screenwriter", "storyboarder", "character_designer"}
 
     # ---------- 阶段元数据 ----------
     @staticmethod
@@ -132,7 +143,7 @@ class InteractiveService:
         if not cls:
             raise ValueError(f"未知阶段: {stage}")
 
-        if stage in ("screenwriter", "storyboarder", "editor"):
+        if stage in ("director", "screenwriter", "storyboarder", "editor"):
             return cls(project_id, lp, api_key=lk)
         if stage == "character_designer":
             return cls(
@@ -220,7 +231,9 @@ class InteractiveService:
             raise ValueError(f"项目不存在: {project_id}")
         # 合并优先级：默认 < 项目创建时的配置 < 本次覆盖
         project_cfg = (state.get("meta") or {}).get("config", {})
-        merged_cfg = {**config.DEFAULT_CONFIG, **project_cfg, **(config_override or {})}
+        # 主题存在 meta.theme，需注入到 config 供导演等阶段使用
+        theme = (state.get("meta") or {}).get("theme", "")
+        merged_cfg = {**config.DEFAULT_CONFIG, **project_cfg, **(config_override or {}), "theme": theme}
         state["current_stage"] = stage
         state["mode"] = "interactive"
         state.setdefault("stages", {})[stage] = {"status": "running", "started_at": now}

@@ -17,6 +17,7 @@ let interactiveCurrent = null;                  // 当前阶段 key
 let currentEnvelope = null;                     // 当前阶段产物信封
 let interactiveConfig = null;                   // {target_duration, llm_provider, ...}
 let interactiveApiKeys = null;                  // {llm_api_key, video_api_key, image_api_key}
+let currentUserRole = null;                     // 'admin' | 'user'
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -43,6 +44,7 @@ function onAuthed(me) {
     document.getElementById('userName').textContent = me.username;
     document.getElementById('btnUserMgmt').style.display =
         (me.role === 'admin') ? 'inline-block' : 'none';
+    currentUserRole = me.role;
     loadProviders();
     updateProviderHint();
 }
@@ -681,3 +683,290 @@ function stageLabel(s) {
 function safeParse(str) {
     try { return JSON.parse(str); } catch (e) { return null; }
 }
+
+// ============ 系统提示词管理 ============
+let currentPromptScope = 'project';
+let promptsData = [];
+const PROMPT_SCOPE_LABEL = { default: '默认', global: '全局', project: '本项目' };
+
+function showPrompts() {
+    if (!currentProjectId) {
+        currentPromptScope = 'global';
+    }
+    const canGlobal = currentUserRole === 'admin';
+    // 项目按钮
+    const projBtn = document.getElementById('scopeProjectBtn');
+    const globBtn = document.getElementById('scopeGlobalBtn');
+    if (!currentProjectId) {
+        projBtn.style.opacity = '0.4';
+        projBtn.style.pointerEvents = 'none';
+    } else {
+        projBtn.style.opacity = '1';
+        projBtn.style.pointerEvents = 'auto';
+    }
+    // 全局按钮（仅管理员可改全局默认）
+    if (!canGlobal) {
+        globBtn.style.opacity = '0.4';
+        globBtn.style.pointerEvents = 'none';
+        globBtn.title = '全局默认仅管理员可修改';
+        if (currentPromptScope === 'global') currentPromptScope = 'project';
+    } else {
+        globBtn.style.opacity = '1';
+        globBtn.style.pointerEvents = 'auto';
+        globBtn.title = '';
+    }
+    document.getElementById('promptScopeHint').textContent = currentProjectId
+        ? '当前作用域针对项目：' + currentProjectId + (canGlobal ? '' : '（全局默认仅管理员可改）')
+        : '未选择项目，仅能编辑全局默认提示词（需管理员）';
+    document.getElementById('promptsModal').style.display = 'flex';
+    setPromptScope(currentPromptScope);
+}
+
+function closePrompts() {
+    document.getElementById('promptsModal').style.display = 'none';
+}
+
+function setPromptScope(scope) {
+    currentPromptScope = scope;
+    document.querySelectorAll('#promptScopeToggle .seg').forEach(b => {
+        b.classList.toggle('active', b.dataset.scope === scope);
+    });
+    loadPrompts();
+}
+
+async function loadPrompts() {
+    try {
+        const url = currentProjectId
+            ? `/api/prompts?project_id=${encodeURIComponent(currentProjectId)}`
+            : '/api/prompts';
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error((await resp.json()).detail || '加载失败');
+        const data = await resp.json();
+        promptsData = data.prompts || [];
+        renderPrompts();
+    } catch (e) {
+        showToast('加载提示词失败: ' + e.message);
+    }
+}
+
+function renderPrompts() {
+    const list = document.getElementById('promptsList');
+    // 按阶段分组
+    const groups = {};
+    promptsData.forEach(p => {
+        (groups[p.stage_label] = groups[p.stage_label] || []).push(p);
+    });
+    list.innerHTML = Object.entries(groups).map(([stageLabel, items]) => `
+        <div class="prompt-block">
+            <div class="prompt-block-title">${escapeHtml(stageLabel)}</div>
+            ${items.map(p => {
+                const initial = (currentPromptScope === 'project' ? p.project : p.global) !== null
+                    ? (currentPromptScope === 'project' ? p.project : p.global)
+                    : p.effective;
+                const scopeTag = (currentPromptScope === 'project' ? p.project : p.global) !== null
+                    ? PROMPT_SCOPE_LABEL[currentPromptScope] : '默认';
+                const tagClass = (currentPromptScope === 'project' ? p.project : p.global) !== null
+                    ? currentPromptScope : 'default';
+                return `
+                <div class="prompt-field">
+                    <div class="prompt-field-label">${escapeHtml(p.key_label)}
+                        <span class="scope-tag ${tagClass}">${scopeTag}</span></div>
+                    <textarea class="prompt-textarea" id="prompt-${p.stage}-${p.key}" data-initial="${escapeHtml(initial || '')}">${escapeHtml(initial || '')}</textarea>
+                </div>`;
+            }).join('')}
+        </div>
+    `).join('');
+}
+
+async function savePrompts() {
+    let saved = 0, failed = 0;
+    for (const p of promptsData) {
+        const ta = document.getElementById(`prompt-${p.stage}-${p.key}`);
+        if (!ta) continue;
+        const val = ta.value;
+        const initial = ta.dataset.initial || '';
+        if (val === initial) continue; // 未修改则不写
+        try {
+            const resp = await fetch('/api/prompts', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    scope: currentPromptScope,
+                    project_id: currentProjectId || undefined,
+                    stage: p.stage, key: p.key, text: val,
+                }),
+            });
+            if (!resp.ok) throw new Error((await resp.json()).detail || '保存失败');
+            saved++;
+        } catch (e) {
+            failed++;
+            showToast('保存失败: ' + e.message);
+        }
+    }
+    if (saved) showToast(`已保存 ${saved} 项提示词`);
+    else if (!failed) showToast('没有改动');
+    if (!failed) loadPrompts();
+}
+
+async function resetPrompts() {
+    if (!confirm('确认将当前作用域的提示词重置为代码默认？此操作会清除对应覆盖。')) return;
+    try {
+        const resp = await fetch('/api/prompts/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scope: currentPromptScope,
+                project_id: currentProjectId || undefined,
+            }),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || '重置失败');
+        showToast('已重置为默认');
+        loadPrompts();
+    } catch (e) {
+        showToast('重置失败: ' + e.message);
+    }
+}
+
+// ============ 角色管理 ============
+let charactersData = [];
+
+function showCharacters() {
+    if (!currentProjectId) { showToast('请先创建项目'); return; }
+    document.getElementById('charactersModal').style.display = 'flex';
+    loadCharacters();
+}
+
+function closeCharacters() {
+    document.getElementById('charactersModal').style.display = 'none';
+}
+
+async function loadCharacters() {
+    try {
+        const resp = await fetch(`/api/projects/${currentProjectId}/characters`);
+        if (!resp.ok) throw new Error((await resp.json()).detail || '加载失败');
+        const data = await resp.json();
+        charactersData = data.characters || [];
+        renderCharacters();
+    } catch (e) {
+        showToast('加载角色失败: ' + e.message);
+    }
+}
+
+function renderCharacters() {
+    const list = document.getElementById('charactersList');
+    if (!charactersData.length) {
+        list.innerHTML = '<p style="color:#8a90a0;text-align:center;padding:20px">暂无角色，点击「新增角色」添加。</p>';
+        return;
+    }
+    list.innerHTML = charactersData.map((c, i) => {
+        const appr = c.appearance || {};
+        const apprRows = Object.entries(appr).map(([k, v], ri) => `
+            <div class="appearance-row">
+                <input class="char-input" placeholder="字段名" value="${escapeHtml(k)}" oninput="updateAppearanceKey(${i}, ${ri}, this.value)">
+                <input class="char-input" placeholder="字段值" value="${escapeHtml(v)}" oninput="updateAppearanceVal(${i}, ${ri}, this.value)">
+                <button class="btn-del-sm" onclick="removeAppearance(${i}, ${ri})">✕</button>
+            </div>
+        `).join('');
+        return `
+        <div class="char-card">
+            <div class="char-card-head">
+                <span class="char-index">角色 #${i + 1}</span>
+                <button class="btn-del-sm" onclick="removeCharacter(${i})">🗑 删除角色</button>
+            </div>
+            <div class="field">
+                <label>姓名 name</label>
+                <input class="char-input" value="${escapeHtml(c.name || '')}" oninput="updateCharField(${i}, 'name', this.value)">
+            </div>
+            <div class="field">
+                <label>定位 role</label>
+                <select class="char-input" onchange="updateCharField(${i}, 'role', this.value)">
+                    ${['主角','配角','反派'].map(r => `<option value="${r}" ${c.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+                </select>
+            </div>
+            <div class="field">
+                <label>性格 personality</label>
+                <textarea class="char-input" rows="2" oninput="updateCharField(${i}, 'personality', this.value)">${escapeHtml(c.personality || '')}</textarea>
+            </div>
+            <div class="char-appearance-title">外貌 appearance（字段自由，可增删）</div>
+            ${apprRows}
+            <button class="btn-add-sm" onclick="addAppearance(${i})">＋ 添加外貌字段</button>
+            <div class="field" style="margin-top:10px">
+                <label>一致性 seed_prompt（影响后续角色一致性）</label>
+                <textarea class="char-input" rows="2" oninput="updateCharField(${i}, 'seed_prompt', this.value)">${escapeHtml(c.seed_prompt || '')}</textarea>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function addCharacter() {
+    charactersData.push({ name: '', role: '主角', personality: '', appearance: {}, seed_prompt: '' });
+    renderCharacters();
+}
+
+function removeCharacter(i) {
+    charactersData.splice(i, 1);
+    renderCharacters();
+}
+
+function updateCharField(i, field, val) {
+    charactersData[i][field] = val;
+}
+
+function addAppearance(i) {
+    const c = charactersData[i];
+    c.appearance = c.appearance || {};
+    // 用一个唯一键避免覆盖
+    let key = '新字段';
+    let n = 1;
+    while (key in c.appearance) { key = '新字段' + (++n); }
+    c.appearance[key] = '';
+    renderCharacters();
+}
+
+function updateAppearanceKey(i, ri, val) {
+    const c = charactersData[i];
+    const keys = Object.keys(c.appearance || {});
+    const oldKey = keys[ri];
+    if (val === oldKey) return;
+    const entries = Object.entries(c.appearance);
+    const newEntries = {};
+    entries.forEach(([k, v], idx) => {
+        if (idx === ri) newEntries[val] = v;
+        else newEntries[k] = v;
+    });
+    c.appearance = newEntries;
+}
+
+function updateAppearanceVal(i, ri, val) {
+    const c = charactersData[i];
+    const keys = Object.keys(c.appearance || {});
+    const k = keys[ri];
+    c.appearance[k] = val;
+}
+
+function removeAppearance(i, ri) {
+    const c = charactersData[i];
+    const keys = Object.keys(c.appearance || {});
+    const newObj = {};
+    keys.forEach((k, idx) => { if (idx !== ri) newObj[k] = c.appearance[k]; });
+    c.appearance = newObj;
+    renderCharacters();
+}
+
+async function saveCharacters() {
+    try {
+        const resp = await fetch(`/api/projects/${currentProjectId}/characters`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characters: charactersData }),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || '保存失败');
+        const data = await resp.json();
+        charactersData = data.characters || [];
+        renderCharacters();
+        showToast(`已保存 ${data.count} 个角色`);
+    } catch (e) {
+        showToast('保存角色失败: ' + e.message);
+    }
+}
+

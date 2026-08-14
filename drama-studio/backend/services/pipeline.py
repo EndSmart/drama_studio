@@ -76,6 +76,12 @@ class PipelineService:
         if not agent_cls:
             raise ValueError(f"未知 agent: {agent_name}")
 
+        # 注入主题（存在 meta.theme，config 本身不含）
+        state = store.load_state(project_id)
+        cfg = dict(config_override or {})
+        if "theme" not in cfg and state:
+            cfg["theme"] = (state.get("meta") or {}).get("theme", "")
+
         agent = agent_cls(project_id, llm_provider, api_key=api_key)
         await self._emit(project_id, agent_name, "running", f"{agent_name} 开始执行")
 
@@ -124,6 +130,13 @@ class PipelineService:
         merged_cfg = {**config.DEFAULT_CONFIG, **cfg}
 
         try:
+            # Stage 0: 总导演（产出导演工作单，供下游使用）
+            state = store.load_state(project_id)
+            merged_cfg = {**merged_cfg, "theme": (state.get("meta") or {}).get("theme", "")}
+            director = self.agents["director"](project_id, llm_provider, api_key=api_key)
+            await director.run(state, merged_cfg)
+            await self._emit(project_id, "director", "completed", "总导演工作单已生成")
+
             # Stage 1-2: 编剧（故事+剧本）
             state = store.load_state(project_id)
             screenwriter = self.agents["screenwriter"](project_id, llm_provider, api_key=api_key)

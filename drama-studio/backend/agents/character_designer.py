@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 from .base import BaseAgent
 from ..providers.image import ImageProviderFactory
 from ..services.storage import store
+from ..services.prompts import prompt_store
 
 logger = logging.getLogger("drama-studio.agents.character")
 
@@ -25,28 +26,6 @@ class CharacterDesignerAgent(BaseAgent):
 
     name = "character_designer"
     description = "角色设计：生成角色设定与基准关键帧图，建立角色卡"
-
-    PROMPT = """你是角色设计总监。根据剧本和分镜中的角色，为每个角色生成标准化的角色卡。
-
-对每个角色输出：
-{{
-  "name": "角色名",
-  "role": "主角/配角/反派",
-  "personality": "性格",
-  "appearance": {{
-    "age": "年龄",
-    "hair": "发型",
-    "face": "脸型",
-    "eyes": "眼睛",
-    "complexion": "肤色",
-    "body": "体型",
-    "clothing": "标志性服装"
-  }},
-  "seed_prompt": "一段固定的外貌描述前缀，用于所有后续图像/视频生成保持一致性（整合 age/hair/face/eyes/complexion/body/clothing 为一句话，如：20岁长发瓜子脸大眼睛皮肤白皙的少女，穿着白色连衣裙）",
-  "style": "视觉风格"
-}}
-
-严格输出 JSON 数组格式：[角色卡1, 角色卡2, ...]"""
 
     def __init__(self, project_id: str, llm_provider: str = None, api_key: str = None,
                  image_provider: str = None, image_api_key: str = None):
@@ -64,6 +43,19 @@ class CharacterDesignerAgent(BaseAgent):
                 self._image = None
         return self._image
 
+    @staticmethod
+    def _build_seed_prompt(card: Dict) -> str:
+        """本地兜底：把 appearance 各字段拼成一句一致性描述。"""
+        parts = []
+        appearance = card.get("appearance") or {}
+        if isinstance(appearance, dict):
+            for v in appearance.values():
+                if v:
+                    parts.append(str(v))
+        if not parts:
+            return card.get("name", "角色")
+        return "，".join(parts)
+
     async def run(self, state: Dict, config: Dict, instruction: str = None) -> Any:
         self.log("角色设计 Agent 开始")
 
@@ -77,19 +69,44 @@ class CharacterDesignerAgent(BaseAgent):
             for c in shot.get("characters_in_shot", []):
                 chars_in_shots.add(c)
 
-        user_msg = (
-            self.PROMPT
-            + f"\n\n剧本中的角色线索：\n{script[:3000]}\n\n分镜出现的角色：{list(chars_in_shots)}\n请为这些角色设计角色卡，输出 JSON 数组。"
-        )
-        if instruction:
-            user_msg += f"\n\n【用户修改意见，请据此调整角色设定】{instruction}"
-            self.log("角色设计按用户意见润色")
+        # 用户预定义角色（角色管理面板写入），若有则以用户定义为基准
+        user_characters = store.load_artifact(self.project_id, "artifacts/characters/characters.json")
+        user_characters = user_characters if isinstance(user_characters, list) and user_characters else []
 
-        character_cards = await self.chat_json(
-            "你是角色设计总监，严格输出 JSON 数组。",
-            user_msg,
-            temperature=0.5,
-        )
+        system_prompt = prompt_store.get_effective(self.project_id, self.name, "system")
+
+        if user_characters:
+            self.log("检测到用户预定义角色，以其为基准做补全/规范化")
+            user_msg = (
+                "以下是用户已经预定义的角色，请直接沿用其 name / role / appearance / seed_prompt，"
+                "仅做必要的补全与规范化（例如补全缺失的 seed_prompt），不要替换或重命名角色。\n"
+                + json.dumps(user_characters, ensure_ascii=False, indent=2)
+            )
+            if instruction:
+                user_msg += f"\n\n【用户修改意见，请据此调整角色设定】{instruction}"
+            try:
+                character_cards = await self.chat_json(system_prompt, user_msg, temperature=0.3)
+            except Exception as e:
+                logger.warning("角色补全 LLM 调用失败，回退使用用户定义: %s", e)
+                character_cards = None
+            if not isinstance(character_cards, list) or not character_cards:
+                # 兜底：直接使用用户定义，本地补全 seed_prompt
+                character_cards = []
+                for c in user_characters:
+                    c = dict(c)
+                    if not c.get("seed_prompt"):
+                        c["seed_prompt"] = self._build_seed_prompt(c)
+                    character_cards.append(c)
+        else:
+            user_msg = (
+                "请根据以下剧本和分镜中的角色设计角色卡。\n\n"
+                f"剧本中的角色线索：\n{script[:3000]}\n\n"
+                f"分镜出现的角色：{list(chars_in_shots)}\n请为这些角色设计角色卡，输出 JSON 数组。"
+            )
+            if instruction:
+                user_msg += f"\n\n【用户修改意见，请据此调整角色设定】{instruction}"
+                self.log("角色设计按用户意见润色")
+            character_cards = await self.chat_json(system_prompt, user_msg, temperature=0.5)
 
         if not isinstance(character_cards, list):
             character_cards = [character_cards]
@@ -99,16 +116,20 @@ class CharacterDesignerAgent(BaseAgent):
         image_provider = self._get_image_provider()
 
         for card in character_cards:
+            if not isinstance(card, dict):
+                continue
             name = card.get("name", "角色")
-            seed_prompt = card.get("seed_prompt", "")
+            # 若 LLM 未给 seed_prompt，本地补全
+            if not card.get("seed_prompt"):
+                card["seed_prompt"] = self._build_seed_prompt(card)
             card["style"] = style
 
-            # 生成角色基准正面图（如果有图像 provider）
-            reference_image = None
-            if image_provider:
+            # 生成角色基准正面图（若尚未有参考图）
+            reference_image = card.get("reference_image") or None
+            if not reference_image and image_provider:
                 try:
                     img_prompt = (
-                        f"角色设计标准照，{seed_prompt}，{style}风格，"
+                        f"角色设计标准照，{card.get('seed_prompt', '')}，{style}风格，"
                         "正面全身照，居中，纯色或简单背景，电影感打光，高清"
                     )
                     reference_image = await image_provider.generate(img_prompt, size="1024*1536")
@@ -121,10 +142,11 @@ class CharacterDesignerAgent(BaseAgent):
             card["character_card_path"] = store.save_artifact(
                 self.project_id, "characters", f"{name}/character_card.json", card
             )
-            if reference_image:
-                store.save_artifact(self.project_id, "characters", f"{name}/reference.png", "", ext="png")
 
             result.append(card)
+
+        # 聚合写入 characters.json，便于「角色管理」面板加载/编辑，以及后续重跑时注入
+        store.save_artifact(self.project_id, "characters", "characters.json", result)
 
         self.log(f"角色设计完成，共 {len(result)} 个角色")
         return {
